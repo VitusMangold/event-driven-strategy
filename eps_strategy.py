@@ -2,12 +2,12 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-# 1. Download historical data
+# 1. Download historical stock data
 ticker = "AAPL"  # Example: Apple
 data = yf.download(ticker, start="2020-01-01", end="2023-10-01")
 print(data.head())
 
-# 2. Add manual EPS data
+# 2. Add manually defined EPS data (Earnings Per Share)
 eps_data = {
     '2020-01-28': {'Actual_EPS': 4.99, 'EPS_Estimate': 4.54},
     '2020-04-30': {'Actual_EPS': 2.55, 'EPS_Estimate': 2.26},
@@ -35,11 +35,11 @@ for date, eps_values in eps_data.items():
         data.at[date, 'EPS_Estimate'] = eps_values['EPS_Estimate']
         data.at[date, 'Actual_EPS'] = eps_values['Actual_EPS']
 
-# Forward-fill EPS data to use until the next earnings report
+# Forward-fill EPS data so that the most recent values are used until the next earnings report
 data['EPS_Estimate'].ffill(inplace=True)
 data['Actual_EPS'].ffill(inplace=True)
 
-# 3. Calculate RSI
+# 3. Calculate RSI (Relative Strength Index)
 def calculate_rsi(data, period=14):
     delta = data['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -53,152 +53,95 @@ data['RSI'] = calculate_rsi(data)
 # 4. Calculate volatility (standard deviation of closing prices over 14 days)
 data['Volatility'] = data['Close'].rolling(window=14).std()
 
-# 5. Calculate Composite Score
-weights = {
-    'Volatility_Score': 0.3,
-    'Volume_Score': 0.15,
-    'Momentum_Score': 0.2,
-    'RSI_Volatility_Score': 0.2,
-    'Beta_Score': 0.15
-}
-
-# Example: Calculate Volatility_Score, Volume_Score, Momentum_Score, RSI_Volatility_Score, Beta_Score
-data['Volatility_Score'] = data['Volatility'] / data['Volatility'].max()
-data['Volume_Score'] = data['Volume'] / data['Volume'].max()
-data['Momentum_Score'] = data['Close'].pct_change(periods=14)  # Momentum over 14 days
-data['RSI_Volatility_Score'] = data['RSI'] / data['RSI'].max()
-data['Beta_Score'] = np.random.uniform(0.5, 2.0, size=len(data))  # Random Beta values
-
-def calculate_composite_score(row, weights):
-    composite_score = 0
-    for key, weight in weights.items():
-        composite_score += row[key] * weight
-    return composite_score
-
-data['Composite_Score']= data.apply(calculate_composite_score, weights=weights, axis=1)
-
-# 6. Check Buy Signals
+# 5. Define Buy Signal Conditions
 def check_buy_signals(df):
-    buy_signals= []
+    buy_signals = []
 
-    for i in range(len(df)-3): # We need 3 days for analysis
-        # 1. EPS >5% above estimates
-        eps_condition= df.iloc[i]['Actual_EPS']> df.iloc[i]['EPS_Estimate']*1.05
+    for i in range(len(df)-3):  # We need at least 3 days of analysis
+        # 1. Actual EPS is more than 5% above the estimated EPS
+        eps_condition = df.iloc[i]['Actual_EPS'] > df.iloc[i]['EPS_Estimate'] * 1.05
 
-        # 2. RSI increases by10% within3 days
-        rsi_condition= (df.iloc[i+3]['RSI']- df.iloc[i]['RSI'])/ df.iloc[i]['RSI']>=0.10
+        # 2. RSI increases by at least 10% within 3 days
+        rsi_condition = (df.iloc[i+3]['RSI'] - df.iloc[i]['RSI']) / df.iloc[i]['RSI'] >= 0.10
 
-        # 3. Price rises >2% next day & stays positive for2 more days
-        price_condition_1= (df.iloc[i+1]['Close']- df.iloc[i]['Close'])/ df.iloc[i]['Close']>0.02
-        price_condition_2= df.iloc[i+2]['Close']> df.iloc[i+1]['Close']
-        price_condition_3= df.iloc[i+3]['Close']> df.iloc[i+2]['Close']
+        # 3. Price increases by more than 2% the next day and continues to rise for two more days
+        price_condition_1 = (df.iloc[i+1]['Close'] - df.iloc[i]['Close']) / df.iloc[i]['Close'] > 0.02
+        price_condition_2 = df.iloc[i+2]['Close'] > df.iloc[i+1]['Close']
+        price_condition_3 = df.iloc[i+3]['Close'] > df.iloc[i+2]['Close']
 
-        # 4. Volatility spike on the following day
-        volatility_condition= df.iloc[i+1]['Volatility']> df.iloc[i]['Volatility']*1.2 # Example:20% increase
+        # 4. Volatility spike on the following day (at least 20% increase)
+        volatility_condition = df.iloc[i+1]['Volatility'] > df.iloc[i]['Volatility'] * 1.2
 
-        # All conditions must be met
+        # All conditions must be met to generate a Buy signal
         if eps_condition and rsi_condition and price_condition_1 and price_condition_2 and price_condition_3 and volatility_condition:
-            buy_signals.append(df.index[i]) # Save the date of the Buy signal
+            buy_signals.append(df.index[i])
 
     return buy_signals
 
-buy_signals= check_buy_signals(data)
+# Apply Buy Signal Check
+buy_signals = check_buy_signals(data)
 print("Buy signals on the following days:", buy_signals)
 
-# 7. Check Sell Signals
+# 6. Define Sell Signal Conditions
 def check_sell_signals(df):
-    sell_signals= []
+    sell_signals = []
 
-    for i in range(len(df)-3): # We need3 days for analysis
-        # 1. EPS >5% below estimates
-        eps_condition= df.iloc[i]['Actual_EPS']< df.iloc[i]['EPS_Estimate']*0.95
+    for i in range(len(df)-3):  # We need at least 3 days of analysis
+        # 1. Actual EPS is more than 5% below the estimated EPS
+        eps_condition = df.iloc[i]['Actual_EPS'] < df.iloc[i]['EPS_Estimate'] * 0.95
 
-        # 2. RSI drops by10% within3 days
-        rsi_condition= (df.iloc[i]['RSI']- df.iloc[i+3]['RSI'])/ df.iloc[i]['RSI']>=0.10
+        # 2. RSI drops by at least 10% within 3 days
+        rsi_condition = (df.iloc[i]['RSI'] - df.iloc[i+3]['RSI']) / df.iloc[i]['RSI'] >= 0.10
 
-        # 3. Price falls >2% next day & stays negative for2 more days
-        price_condition_1= (df.iloc[i]['Close']- df.iloc[i+1]['Close'])/ df.iloc[i]['Close']>0.02
-        price_condition_2= df.iloc[i+2]['Close']< df.iloc[i+1]['Close']
-        price_condition_3= df.iloc[i+3]['Close']< df.iloc[i+2]['Close']
+        # 3. Price decreases by more than 2% the next day and continues to fall for two more days
+        price_condition_1 = (df.iloc[i]['Close'] - df.iloc[i+1]['Close']) / df.iloc[i]['Close'] > 0.02
+        price_condition_2 = df.iloc[i+2]['Close'] < df.iloc[i+1]['Close']
+        price_condition_3 = df.iloc[i+3]['Close'] < df.iloc[i+2]['Close']
 
-        # 4. Volatility spike on the following day
-        volatility_condition= df.iloc[i+1]['Volatility']> df.iloc[i]['Volatility']*1.2 # Example:20% increase
+        # 4. Volatility spike on the following day (at least 20% increase)
+        volatility_condition = df.iloc[i+1]['Volatility'] > df.iloc[i]['Volatility'] * 1.2
 
-        # All conditions must be met
+        # All conditions must be met to generate a Sell signal
         if eps_condition and rsi_condition and price_condition_1 and price_condition_2 and price_condition_3 and volatility_condition:
-            sell_signals.append(df.index[i]) # Save the date of the Sell signal
+            sell_signals.append(df.index[i])
 
     return sell_signals
 
-sell_signals= check_sell_signals(data)
+# Apply Sell Signal Check
+sell_signals = check_sell_signals(data)
 print("Sell signals on the following days:", sell_signals)
 
-# 8. Exit conditions for Buy positions
-def check_buy_exit(df, entry_index):
-    exit_conditions= []
+# 7. Backtesting Function
+def backtest(df, signals, initial_balance=10000):
+    balance = initial_balance
+    position = None
+    entry_price = 0
 
-    for i in range(entry_index+1, min(entry_index+4, len(df))): # Check the next3 days
-        # 1. Price drops >2%
-        price_drop_condition= (df.iloc[entry_index]['Close']- df.iloc[i]['Close'])/ df.iloc[entry_index]['Close']>0.02
+    for date, signal in signals:
+        price = df.loc[date, 'Close']
 
-        # 2. RSI falls >5%
-        rsi_drop_condition= (df.iloc[entry_index]['RSI']- df.iloc[i]['RSI'])/ df.iloc[entry_index]['RSI']>0.05
+        if signal == "Buy" and position is None:
+            position = balance / price  # Buy as many shares as possible
+            entry_price = price
+            balance = 0  # All money invested
 
-        # If either condition is met, save the exit date
-        if price_drop_condition or rsi_drop_condition:
-            exit_conditions.append(df.index[i])
-            break # Stop the loop once a condition is met
+        elif signal == "Sell" and position is not None:
+            balance = position * price  # Sell all shares
+            position = None
 
-    return exit_conditions
+    # If still holding a position at the end, sell it
+    if position is not None:
+        balance = position * df.iloc[-1]['Close']
 
-# 9. Exit conditions for Sell positions
-def check_sell_exit(df, entry_index):
-    exit_conditions= []
+    return {
+        "Final Balance": balance,
+        "Return (%)": ((balance - initial_balance) / initial_balance) * 100,
+    }
 
-    for i in range(entry_index+1, min(entry_index+4, len(df))): # Check the next3 days
-        # 1. Price rises >2%
-        price_rise_condition= (df.iloc[i]['Close']- df.iloc[entry_index]['Close'])/ df.iloc[entry_index]['Close']>0.02
+# Convert buy signals and sell signals into tuples with labels
+signals = [(date, "Buy") for date in buy_signals] + [(date, "Sell") for date in sell_signals]
 
-        # 2. RSI increases >5%
-        rsi_rise_condition= (df.iloc[i]['RSI']- df.iloc[entry_index]['RSI'])/ df.iloc[entry_index]['RSI']>0.05
+# Run Backtesting
+results = backtest(data, signals)
 
-        # If either condition is met, save the exit date
-        if price_rise_condition or rsi_rise_condition:
-            exit_conditions.append(df.index[i])
-            break # Stop the loop once a condition is met
-
-    return exit_conditions
-
-# 10. Trading strategy
-def trading_strategy(df):
-    signals= [] # Stores all signals (Buy, Sell, Exit)
-    position= None # Current position (None, "Buy", "Sell")
-
-    for i in range(len(df)-3): # We need3 days for analysis
-        # Check Buy signal
-        if check_buy_signals(df.iloc[i:i+4].reset_index(drop=True)): # Check the next3 days
-            signals.append((df.index[i], "Buy"))
-            position= "Buy"
-
-        # Check Sell signal
-        elif check_sell_signals(df.iloc[i:i+4].reset_index(drop=True)):
-            signals.append((df.index[i], "Sell"))
-            position= "Sell"
-
-        # Check exit conditions if a position is open
-        if position== "Buy":
-            exit_dates= check_buy_exit(df, i)
-            if exit_dates:
-                signals.append((exit_dates[0], "Exit Buy"))
-                position= None
-        elif position== "Sell":
-            exit_dates= check_sell_exit(df, i)
-            if exit_dates:
-                signals.append((exit_dates[0], "Exit Sell"))
-                position= None
-
-    return signals
-
-# Apply the strategy to the data
-signals= trading_strategy(data)
-print("Signals:", signals)
+print(results)
